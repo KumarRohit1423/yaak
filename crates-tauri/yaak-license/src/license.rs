@@ -204,48 +204,13 @@ pub async fn deactivate_license<R: Runtime>(window: &WebviewWindow<R>) -> Result
     Ok(())
 }
 
-pub async fn check_license<R: Runtime>(window: &WebviewWindow<R>) -> Result<LicenseCheckStatus> {
-    let app_version = window.app_handle().package_info().version.to_string();
-    let payload =
-        CheckActivationRequestPayload { app_platform: get_os_str().to_string(), app_version };
-    let activation_id = get_activation_id(window.app_handle()).await;
-
-    let settings = window.db().get_settings();
-    let trial_end = settings.created_at.add(Duration::from_secs(TRIAL_SECONDS)).and_utc();
-
-    let has_activation_id = !activation_id.is_empty();
-    let trial_period_active = Utc::now() < trial_end;
-
-    match (has_activation_id, trial_period_active) {
-        (false, true) => Ok(LicenseCheckStatus::Trialing { end: trial_end }),
-        (false, false) => Ok(LicenseCheckStatus::PersonalUse { trial_ended: trial_end }),
-        (true, _) => {
-            info!("Checking license activation");
-            // A license has been activated, so let's check the license server
-            let client = yaak_api_client(ApiClientKind::App, &payload.app_version)?;
-            let path = format!("/licenses/activations/{activation_id}/check-v2");
-            let response = client.post(build_url(&path)).json(&payload).send().await?;
-
-            if response.status().is_client_error() {
-                let body: APIErrorResponsePayload = response.json().await?;
-                return Err(ClientError { message: body.message, error: body.error });
-            }
-
-            if response.status().is_server_error() {
-                warn!("Failed to check license {}", response.status());
-                return Err(ServerError);
-            }
-
-            let body_text = response.text().await?;
-            match serde_json::from_str::<LicenseCheckStatus>(&body_text) {
-                Ok(b) => Ok(b),
-                Err(e) => {
-                    warn!("Failed to decode server response: {} {:?}", body_text, e);
-                    Err(JsonError(e))
-                }
-            }
-        }
-    }
+pub async fn check_license<R: Runtime>(_window: &WebviewWindow<R>) -> Result<LicenseCheckStatus> {
+    // Personal-use patch: always report an active license
+    let period_end = Utc::now().add(Duration::from_secs(3600 * 24 * 365 * 100));
+    Ok(LicenseCheckStatus::Active {
+        period_end,
+        cancel_at: None,
+    })
 }
 
 fn build_url(path: &str) -> String {
