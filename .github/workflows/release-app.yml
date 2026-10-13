@@ -2,6 +2,12 @@ name: Release App Artifacts
 on:
   push:
     tags: [v*]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: App to publish
+        required: true
+        type: string
 
 jobs:
   build-artifacts:
